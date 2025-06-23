@@ -1,5 +1,6 @@
 package discuss.ai.teacher.service;
 
+import discuss.ai.teacher.dto.TeacherSignupRequestDto;
 import discuss.ai.teacher.entity.Teacher;
 import discuss.ai.teacher.repository.TeacherRepository;
 import lombok.RequiredArgsConstructor;
@@ -25,10 +26,10 @@ public class TeacherService {
      *     그런데 ifPresent는 말 그대로 값이 있을 때 우리가 람다로 지정한 메소드의 기능을 따른다. 그래서 사용자가 있는거니까 이미 사용중인 이메일이다. 라고 할 수 있고 이를 accept가 잡아 일을 처리할 뿐인 것이다.
      */
     @Transactional
-    public Teacher signup(String email, String password){
-        teacherRepository.findByUserEmail(email).ifPresent(teacher -> {
+    public Teacher signup(TeacherSignupRequestDto teacherDto){
+        teacherRepository.findByUserEmail(teacherDto.getEmail()).ifPresent(teacher -> {
             throw new IllegalStateException("이미 사용중인 이메일입니다.");});
-        Teacher teacher = Teacher.createTeacher(email, password);
+        Teacher teacher = Teacher.createTeacher(teacherDto);
         return teacherRepository.save(teacher);
     }
 }
