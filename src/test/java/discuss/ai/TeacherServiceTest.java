@@ -4,6 +4,8 @@ import discuss.ai.teacher.dto.TeacherSignupRequestDto;
 import discuss.ai.teacher.entity.Teacher;
 import discuss.ai.teacher.repository.TeacherRepository;
 import discuss.ai.teacher.service.TeacherService;
+import discuss.ai.teacher.util.EmailService;
+import discuss.ai.teacher.util.VerificationStorageService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -11,7 +13,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.time.Duration;
 import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.*; //verify, any 등이 쓰이는 라이브러리
 import static org.assertj.core.api.Assertions.*;
@@ -20,10 +26,12 @@ import static org.assertj.core.api.Assertions.*;
 public class TeacherServiceTest {
     @Mock
     private TeacherRepository teacherRepository;
-
     @InjectMocks
     private TeacherService teacherService;
-
+    @Mock
+    private EmailService emailService;
+    @Mock
+    private VerificationStorageService verificationStorage;
     private TeacherSignupRequestDto requestDto;
     @BeforeEach
     void setUp() {
@@ -36,50 +44,95 @@ public class TeacherServiceTest {
     }
 
     @Test
-    @DisplayName("선생님이 이메일과 비밀번호를 통해 회원가입에 성공한다.")
-    void signup_success(){
-        //given
-        Teacher teacher = Teacher.createTeacher(requestDto);
-        when(teacherRepository.save(any(Teacher.class))).thenReturn(teacher);
-
-        //when
-        Teacher savedTeacher = teacherService.signup(requestDto);
-
-        //then
-        assertThat(savedTeacher.getUserEmail()).isEqualTo(requestDto.getEmail());
-        // verify 뒤의 times는 해당 메소드가 몇 회 실시되었는가를 의미
-        verify(teacherRepository, times(1)).save(any(Teacher.class));
+    @DisplayName("이미 가입된 이메일로 인증을 요청하면 예외가 발생한다.")
+    void sendEmail_fail_when_email_is_duplicate() {
+        // given
+        String existingEmail = "exist@test.com";
+        // findByUserEmail로 existingEmail을 조회하면, 이미 사용자가 있다고 설정
+        when(teacherRepository.findByUserEmail(existingEmail)).thenReturn(Optional.of(Teacher.createTeacher(requestDto)));
+        // when & then
+        // requestVerification(existingEmail)을 실행하면, IllegalStateException이 터져야 한다!
+        assertThrows(IllegalStateException.class, () -> {
+            teacherService.sendEmail(existingEmail);
+        });
+        // emailService의 메일 발송 메소드는 절대 호출되면 안 된다.
+        verify(emailService, never()).sendVerificationEmail(anyString(), anyString());
     }
 
     @Test
-    @DisplayName("중복된 이메일로 회원가입 시 예외가 발생한다.")
-    void signup_fail_with_duplicate_email() {
-        // given (주어진 상황)
-        // "이메일이 이미 존재한다"는 상황을 시뮬레이션해야 합니다.
-        // 1. 가짜 '기존 사용자' 객체를 하나 만듭니다.
-        Teacher existingTeacher = Teacher.createTeacher(requestDto);
+    @DisplayName("새로운 이메일로 인증을 요청하면, 토큰 저장 및 메일 발송을 요청한다.")
+    void sendEmail_success_when_email_is_new() {
+        // given
+        String newEmail = "new@test.com";
+        when(teacherRepository.findByUserEmail(newEmail)).thenReturn(Optional.empty());
+        // when
+        teacherService.sendEmail(newEmail);
+        // then
+        verify(verificationStorage, times(1)).save(eq(newEmail), anyString(), any(Duration.class));
+        verify(emailService, times(1)).sendVerificationEmail(eq(newEmail), anyString());
+    }
 
-        // 2. teacherRepository.findByEmail(email)이 호출되면,
-        //    null이 아닌 위에서 만든 '기존 사용자' 객체를 Optional에 담아 반환하도록 설정합니다.
-        when(teacherRepository.findByUserEmail(requestDto.getEmail())).thenReturn(Optional.of(existingTeacher));
+    @Test
+    @DisplayName("올바른 토큰으로 인증을 요청하면, 성공하고 토큰은 삭제된다.")
+    void verifyEmail_success_when_token_is_valid() {
+        // given
+        String email = "test@test.com";
+        String token = "valid-token-123";
+        when(verificationStorage.findByKey(email)).thenReturn(Optional.of(token));
+        // when & then
+        // void 메소드가 예외를 던지지 않는 것을 검증하는 가장 좋은 방법
+        assertDoesNotThrow(() -> teacherService.verifyEmail(email, token));
+        // 토큰이 삭제되었는지 검증
+        verify(verificationStorage, times(1)).delete(email);
+    }
 
-        // when & then (무엇을 할 때 & 결과가 어때야 하는가)
-        /**
-         * assertThrows에 들어가보면 필요 인자로 assertThrows(Class<T> expectedType, Executable executable)를 사용하는 것을 알 수 있다.
-         * 앞 부분 T가 의미하는 것은 제너릭으로 어떤 클래스든 가능하다는 것이고, 뒤에 Executable은 함수형 인터페이스로 단 하나의 추상 메소드만을 가질 수 있다.
-         * 그래서 우리는 executable 자리에 우리가 실행시켜서 예외를 발생시키는 메소드를 넣는 것이다!!
-         */
-        IllegalStateException exception = assertThrows(IllegalStateException.class, () -> {
-            teacherService.signup(requestDto);
+    @Test
+    @DisplayName("인증 완료 후 모든 정보로 최종 회원가입을 요청하면 성공한다.")
+    void signup_success_after_verification() {
+        // given
+        when(teacherRepository.findByUserEmail(requestDto.getEmail())).thenReturn(Optional.empty());
+        when(teacherRepository.save(any(Teacher.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        // when
+        Teacher savedTeacher = teacherService.signup(requestDto);
+        // then
+        verify(teacherRepository, times(1)).save(any(Teacher.class));
+        assertThat(savedTeacher.getUserEmail()).isEqualTo(requestDto.getEmail());
+    }
+
+    @Test
+    @DisplayName("사용자가 메일로 전달받은 인증 토큰 확인 요청했으나, 토큰이 유효하지 않아 인증에 실패한다.")
+    void invalidToken(){
+        // given: '상황 설정'
+        String email = "test@test.com";
+        String providedToken = "WRONG-token-789";   // 사용자가 입력한 '틀린' 토큰
+        String storedToken = "CORRECT-token-123"; // Redis에 저장되어 있는 '올바른' 토큰
+        // 1. Redis(가짜 저장소)에 '올바른' 토큰이 저장되어 있다고 가정합니다.
+        when(verificationStorage.findByKey(email)).thenReturn(Optional.of(storedToken));
+        // when & then: '행동'과 '검증'을 동시에
+        // 2. '틀린' 토큰으로 verifyEmail을 실행하면, "인증 코드가 일치하지 않습니다." 예외가 발생해야 합니다.
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () -> {
+            teacherService.verifyEmail(email, providedToken);
         });
-        /**
-         * 나 : 그냥 바로 singup 던지면 안되나? 왜 굳이 람다를 써야하는가?
-         * assertThrows는 첫번째 인자로 제너릭을 받고 두번째 인자로는 함수형 인터페이스를 받는다.
-         * assertThrows는 내부적으로 동작할 때 앞에 제너릭을 try-catch의 catch 부분에 두고, 두번째 인자를 try에 둔다.
-         * 즉 Executable은 함수형 인터페이스의 구현체이니 실행되어야할 메소드 그 자체가 들어와야한다. 나처럼 메소드를 집어넣으면 메소드가 연산한 값을 넣는 것이지 저 메소드 자체를 try 안에 두어 예외를 던지지 못한다는 것이다.
-         */
-        // IllegalStateException exception2 = assertThrows(IllegalStateException.class,teacherService.signup(email,password));
-        assertThat(exception.getMessage()).isEqualTo("이미 사용중인 이메일입니다.");
-        verify(teacherRepository, never()).save(any(Teacher.class));
+        assertThat(exception.getMessage()).isEqualTo("인증 코드가 일치하지 않습니다.");
+        // 3. (추가 검증) 인증에 실패했으므로, 토큰은 삭제되지 않았어야 합니다.
+        verify(verificationStorage, never()).delete(email);
+    }
+    @Test
+    @DisplayName("인증 토큰이 만료되었거나 존재하지 않아 인증에 실패한다.")
+    void timeOutAuthentication() {
+        // given: '상황 설정'
+        String email = "test@test.com";
+        String providedToken = "any-token-because-it-doesnt-matter";
+        // 1. Redis(가짜 저장소)를 조회하면, 비어있는 Optional을 반환하도록 설정합니다.
+        // -> 이것이 '토큰이 없거나 만료된' 상황을 흉내 내는 것입니다.
+        when(verificationStorage.findByKey(email)).thenReturn(Optional.empty());
+        // when & then: '행동'과 '검증'을 동시에
+        // 2. verifyEmail을 실행하면, "인증 정보가 만료..." 예외가 발생해야 합니다.
+        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () -> {
+            teacherService.verifyEmail(email, providedToken);
+        });
+        assertThat(exception.getMessage()).isEqualTo("인증 정보가 만료되었거나 존재하지 않습니다.");
+        // 3. (추가 검증) 당연히 토큰이 없었으므로, 삭제 로직도 호출될 일이 없습니다.
+        verify(verificationStorage, never()).delete(email);
     }
 }
