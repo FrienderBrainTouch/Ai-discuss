@@ -29,6 +29,7 @@ public class TeacherSignUpService {
             throw new IllegalStateException("이미 사용중인 이메일입니다.");
         });
         String verificationToken = UUID.randomUUID().toString();
+        //key : 사용자의 이메일을 기반으로 토큰을 생성하는 메소드
         verificationStorage.save(email, verificationToken, Duration.ofMinutes(5));
         emailService.sendVerificationEmail(email, verificationToken);
     }
