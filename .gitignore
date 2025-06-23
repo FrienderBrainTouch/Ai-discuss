@@ -37,6 +37,6 @@ out/
 .vscode/
 
 ### 환경 설정 ###
-/src/main/resources/appliation.yml
-/src/main/resources/appliation-**.yml
+/src/main/resources/application.yml
+/src/main/resources/application-**.yml
 
