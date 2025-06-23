@@ -14,7 +14,7 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
-public class TeacherService {
+public class TeacherSignUpService {
     private final TeacherRepository teacherRepository;
     private final EmailService emailService;
     private final VerificationStorageService verificationStorage;

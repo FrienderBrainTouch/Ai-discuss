@@ -3,7 +3,7 @@ package discuss.ai;
 import discuss.ai.teacher.dto.TeacherSignupRequestDto;
 import discuss.ai.teacher.entity.Teacher;
 import discuss.ai.teacher.repository.TeacherRepository;
-import discuss.ai.teacher.service.TeacherService;
+import discuss.ai.teacher.service.TeacherSignUpService;
 import discuss.ai.teacher.util.EmailService;
 import discuss.ai.teacher.util.VerificationStorageService;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,11 +23,11 @@ import static org.mockito.Mockito.*; //verify, any 등이 쓰이는 라이브러
 import static org.assertj.core.api.Assertions.*;
 
 @ExtendWith(MockitoExtension.class)
-public class TeacherServiceTest {
+public class TeacherSignUpServiceTest {
     @Mock
     private TeacherRepository teacherRepository;
     @InjectMocks
-    private TeacherService teacherService;
+    private TeacherSignUpService teacherSignUpService;
     @Mock
     private EmailService emailService;
     @Mock
@@ -53,7 +53,7 @@ public class TeacherServiceTest {
         // when & then
         // requestVerification(existingEmail)을 실행하면, IllegalStateException이 터져야 한다!
         assertThrows(IllegalStateException.class, () -> {
-            teacherService.sendEmail(existingEmail);
+            teacherSignUpService.sendEmail(existingEmail);
         });
         // emailService의 메일 발송 메소드는 절대 호출되면 안 된다.
         verify(emailService, never()).sendVerificationEmail(anyString(), anyString());
@@ -66,7 +66,7 @@ public class TeacherServiceTest {
         String newEmail = "new@test.com";
         when(teacherRepository.findByUserEmail(newEmail)).thenReturn(Optional.empty());
         // when
-        teacherService.sendEmail(newEmail);
+        teacherSignUpService.sendEmail(newEmail);
         // then
         verify(verificationStorage, times(1)).save(eq(newEmail), anyString(), any(Duration.class));
         verify(emailService, times(1)).sendVerificationEmail(eq(newEmail), anyString());
@@ -81,7 +81,7 @@ public class TeacherServiceTest {
         when(verificationStorage.findByKey(email)).thenReturn(Optional.of(token));
         // when & then
         // void 메소드가 예외를 던지지 않는 것을 검증하는 가장 좋은 방법
-        assertDoesNotThrow(() -> teacherService.verifyEmail(email, token));
+        assertDoesNotThrow(() -> teacherSignUpService.verifyEmail(email, token));
         // 토큰이 삭제되었는지 검증
         verify(verificationStorage, times(1)).delete(email);
     }
@@ -93,7 +93,7 @@ public class TeacherServiceTest {
         when(teacherRepository.findByUserEmail(requestDto.getEmail())).thenReturn(Optional.empty());
         when(teacherRepository.save(any(Teacher.class))).thenAnswer(invocation -> invocation.getArgument(0));
         // when
-        Teacher savedTeacher = teacherService.signup(requestDto);
+        Teacher savedTeacher = teacherSignUpService.signup(requestDto);
         // then
         verify(teacherRepository, times(1)).save(any(Teacher.class));
         assertThat(savedTeacher.getUserEmail()).isEqualTo(requestDto.getEmail());
@@ -111,7 +111,7 @@ public class TeacherServiceTest {
         // when & then: '행동'과 '검증'을 동시에
         // 2. '틀린' 토큰으로 verifyEmail을 실행하면, "인증 코드가 일치하지 않습니다." 예외가 발생해야 합니다.
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () -> {
-            teacherService.verifyEmail(email, providedToken);
+            teacherSignUpService.verifyEmail(email, providedToken);
         });
         assertThat(exception.getMessage()).isEqualTo("인증 코드가 일치하지 않습니다.");
         // 3. (추가 검증) 인증에 실패했으므로, 토큰은 삭제되지 않았어야 합니다.
@@ -129,7 +129,7 @@ public class TeacherServiceTest {
         // when & then: '행동'과 '검증'을 동시에
         // 2. verifyEmail을 실행하면, "인증 정보가 만료..." 예외가 발생해야 합니다.
         IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () -> {
-            teacherService.verifyEmail(email, providedToken);
+            teacherSignUpService.verifyEmail(email, providedToken);
         });
         assertThat(exception.getMessage()).isEqualTo("인증 정보가 만료되었거나 존재하지 않습니다.");
         // 3. (추가 검증) 당연히 토큰이 없었으므로, 삭제 로직도 호출될 일이 없습니다.
